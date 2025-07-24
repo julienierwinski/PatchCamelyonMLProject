@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torch.optim as optim
+import torchvision.utils as vutils
 
 # # Open test images
 # with h5py.File('camelyonpatch_level_2_split_test_x.h5', 'r') as f:
@@ -72,7 +73,7 @@ class Discriminator(nn.Module):
         self.conv2 = nn.Conv2d(in_channels=16, out_channels=8, kernel_size=3, padding=1)
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.fc1 = nn.Linear(8*24*24, 128)
-        self.fc2 = nn.Linear(128, 2)
+        self.fc2 = nn.Linear(128, 1)
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -86,14 +87,13 @@ class Discriminator(nn.Module):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
-        x = F.softmax(x, dim=0)
-
+        x = F.sigmoid(x)
         return x
 
 
 class Generator(nn.Module):
 
-    def __init__(self, z_dim=128, g_channels=64, out_channels=3):
+    def __init__(self, z_dim=100, g_channels=64, out_channels=3):
             super().__init__()
 
             # input Z: (z_dim, 1, 1)
@@ -127,7 +127,6 @@ class Generator(nn.Module):
             z = self.bn4(z)
             z = self.relu(z)
             z = self.convT5(z)
-            z = self.bn5(z)
             z = self.tanh(z)
             return z
 
@@ -148,26 +147,60 @@ discriminator.apply(weights_init)
 optimizerG = optim.Adam(generator.parameters(), lr=0.1, betas=(0.5, 0.999))
 optimizerD = optim.Adam(discriminator.parameters(), lr=0.1, betas=(0.5, 0.999))
 
+
+img_list = []
+G_losses = []
+D_losses = []
 epochs = 10
+iters = 0
 for epoch in range(epochs):
     for i, data in enumerate(dataloader, 0):
-        ## Train with all-real batch
+        ## Train using real batch
         discriminator.zero_grad()
         real_cpu = data.to(device)
-        b_size = real_cpu.size(0)
-        label = torch.full((b_size,), real_label, dtype=torch.float, device=device)
+        batch = real_cpu.size(0)
+        label = torch.full((batch,), real_label, dtype=torch.float, device=device)
         output = discriminator(real_cpu).view(-1)
-        errD_real = criterion(output, label)
-        errD_real.backward()
+        err_real = criterion(output, label)
+        err_real.backward()
         D_x = output.mean().item()
 
-        ## Train with all-fake batch
-        noise = torch.randn(b_size, 100, 1, 1, device=device)
+        ## Train using fake batch
+        noise = torch.randn(batch, 100, 1, 1, device=device)
         fake = generator(noise)
         label.fill_(fake_label)
-        output = generator(fake.detach()).view(-1)
-        errD_fake = criterion(output, label)
-        errD_fake.backward()
+        output = discriminator(fake.detach()).view(-1)
+        err_fake = criterion(output, label)
+        err_fake.backward()
         D_G_z1 = output.mean().item()
-        errD = errD_real + errD_fake
+        errD = err_real + err_fake
         optimizerD.step()
+
+        generator.zero_grad()
+        label.fill_(real_label)
+        output = discriminator(fake).view(-1)
+        # Calculate G's loss based on this output
+        errG = criterion(output, label)
+        # Calculate gradients for G
+        errG.backward()
+        D_G_z2 = output.mean().item()
+        # Update G
+        optimizerG.step()
+
+        # Output training stats
+        if i % 50 == 0:
+            print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f'
+                  % (epoch, epochs, i, len(dataloader),
+                     errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
+
+        # Save Losses for plotting later
+        G_losses.append(errG.item())
+        D_losses.append(errD.item())
+
+        # Check how the generator is doing by saving G's output on fixed_noise
+        if (iters % 500 == 0) or ((epoch == epochs - 1) and (i == len(dataloader) - 1)):
+            with torch.no_grad():
+                fake = generator(fixed_noise).detach().cpu()
+            img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
+
+        iters += 1
