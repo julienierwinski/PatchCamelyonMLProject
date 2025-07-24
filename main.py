@@ -68,21 +68,63 @@ class Discriminator(nn.Module):
         x = self.conv2(x)
         x = self.relu(x)
         x = self.pool2(x)
-        print(x.shape)
         x = x.flatten()
-        print(x.shape)
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
-        print(x.shape)
         x = F.softmax(x, dim=0)
 
         return x
 
 
+class Generator(nn.Module):
+    class Generator(nn.Module):
+        def __init__(self, z_dim=128, g_channels=64, out_channels=3):
+            super().__init__()
+
+            # input Z: (z_dim, 1, 1)
+            self.convT1 = nn.ConvTranspose2d(z_dim, g_channels * 8, 6, 1, 0, bias=False)  # 6x6
+            self.bn1 = nn.BatchNorm2d(g_channels * 8)
+
+            self.convT2 = nn.ConvTranspose2d(g_channels * 8, g_channels * 4, 4, 2, 1, bias=False)  # 6x6
+            self.bn2 = nn.BatchNorm2d(g_channels * 4)
+
+            self.convT3 = nn.ConvTranspose2d(g_channels * 4, g_channels * 2, 4, 2, 1, bias=False)  # 6x6
+            self.bn3 = nn.BatchNorm2d(g_channels * 2)
+
+            self.convT4 = nn.ConvTranspose2d(g_channels * 2, g_channels, 4, 2, 1, bias=False)  # 6x6
+            self.bn4 = nn.BatchNorm2d(g_channels)
+
+            self.convT5 = nn.ConvTranspose2d(g_channels, out_channels, 4, 2, 1, bias=False)  # 6x6
+            self.tanh = nn.Tanh()
+            self.relu = nn.ReLU()
+
+        def forward(self, z):
+            z = self.convT1(z)
+            z = self.bn1(z)
+            z = self.relu(z)
+            z = self.convT2(z)
+            z = self.bn2(z)
+            z = self.relu(z)
+            z = self.convT3(z)
+            z = self.bn3(z)
+            z = self.relu(z)
+            z = self.convT4(z)
+            z = self.bn4(z)
+            z = self.relu(z)
+            z = self.convT5(z)
+            z = self.bn5(z)
+            z = self.tanh(z)
+            return z
 
 
 
 model = Discriminator()
 x = dataset.__getitem__(10)
 model.forward(x)
+
+
+print(torch.__version__)
+print(torch.cuda.is_available())              # should be True
+print(torch.version.cuda)                     # should be '11.8'
+print(torch.cuda.get_device_name(0))          # GPU name
