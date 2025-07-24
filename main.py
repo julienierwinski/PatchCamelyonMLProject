@@ -8,6 +8,9 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import torch.optim as optim
 import torchvision.utils as vutils
+import matplotlib.animation as animation
+from IPython.display import HTML
+
 
 # # Open test images
 # with h5py.File('camelyonpatch_level_2_split_test_x.h5', 'r') as f:
@@ -20,10 +23,6 @@ import torchvision.utils as vutils
 # plt.axis("off")
 # plt.show()
 device = 'cuda'
-print(torch.__version__)
-print(torch.cuda.is_available())              # should be True
-print(torch.version.cuda)                     # should be '11.8'
-print(torch.cuda.get_device_name(0))          # GPU name
 
 class PCamDataset(Dataset):
     def __init__(self, h5_path, transform=None):
@@ -51,7 +50,7 @@ transform = transforms.Compose([
     transforms.Normalize([0.5]*3, [0.5]*3)
 ])
 
-dataset = PCamDataset("camelyonpatch_level_2_split_test_x.h5", transform=transform)
+dataset = PCamDataset("camelyonpatch_level_2_split_train_x.h5", transform=transform)
 dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
 
 
@@ -68,25 +67,29 @@ class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(in_channels=16, out_channels=8, kernel_size=3, padding=1)
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.fc1 = nn.Linear(8*24*24, 128)
-        self.fc2 = nn.Linear(128, 1)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=4, stride=2, padding=1, bias=False)
+
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1, bias=False)
+
+        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1, bias=False)
+
+        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1, bias=False)
+
+        self.conv5 = nn.Conv2d(in_channels=512, out_channels=1, kernel_size=6, stride=1, padding=0, bias=False)
+
         self.relu = nn.ReLU()
 
     def forward(self, x):
         x = self.conv1(x)
         x = self.relu(x)
-        x = self.pool1(x)
         x = self.conv2(x)
         x = self.relu(x)
-        x = self.pool2(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc1(x)
+        x = self.conv3(x)
         x = self.relu(x)
-        x = self.fc2(x)
+        x = self.conv4(x)
+        x = self.relu(x)
+        x = self.conv5(x)
+        x = x.view(x.size(0), -1)
         x = F.sigmoid(x)
         return x
 
@@ -144,14 +147,14 @@ fake_label = 0.
 generator.apply(weights_init)
 discriminator.apply(weights_init)
 
-optimizerG = optim.Adam(generator.parameters(), lr=0.1, betas=(0.5, 0.999))
-optimizerD = optim.Adam(discriminator.parameters(), lr=0.1, betas=(0.5, 0.999))
+optimizerG = optim.Adam(generator.parameters(), lr=2e-4, betas=(0.5, 0.999))
+optimizerD = optim.Adam(discriminator.parameters(), lr=2e-4, betas=(0.5, 0.999))
 
 
 img_list = []
 G_losses = []
 D_losses = []
-epochs = 10
+epochs = 1
 iters = 0
 for epoch in range(epochs):
     for i, data in enumerate(dataloader, 0):
@@ -204,3 +207,28 @@ for epoch in range(epochs):
             img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
 
         iters += 1
+
+
+fig = plt.figure(figsize=(8,8))
+plt.axis("off")
+ims = [[plt.imshow(np.transpose(i,(1,2,0)), animated=True)] for i in img_list]
+ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=1000, blit=True)
+
+HTML(ani.to_jshtml())
+
+# Grab a batch of real images from the dataloader
+real_batch = next(iter(dataloader))
+
+# Plot the real images
+plt.figure(figsize=(15,15))
+plt.subplot(1,2,1)
+plt.axis("off")
+plt.title("Real Images")
+plt.imshow(np.transpose(vutils.make_grid(real_batch[0].to(device)[:64], padding=5, normalize=True).cpu(),(1,2,0)))
+
+# Plot the fake images from the last epoch
+plt.subplot(1,2,2)
+plt.axis("off")
+plt.title("Fake Images")
+plt.imshow(np.transpose(img_list[-1],(1,2,0)))
+plt.show()
