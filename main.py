@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import torch.optim as optim
 
 # # Open test images
 # with h5py.File('camelyonpatch_level_2_split_test_x.h5', 'r') as f:
@@ -17,7 +18,11 @@ from torchvision import transforms
 # plt.imshow(x_test[150])  # RGB image
 # plt.axis("off")
 # plt.show()
-
+device = 'cuda'
+print(torch.__version__)
+print(torch.cuda.is_available())              # should be True
+print(torch.version.cuda)                     # should be '11.8'
+print(torch.cuda.get_device_name(0))          # GPU name
 
 class PCamDataset(Dataset):
     def __init__(self, h5_path, transform=None):
@@ -46,7 +51,16 @@ transform = transforms.Compose([
 ])
 
 dataset = PCamDataset("camelyonpatch_level_2_split_test_x.h5", transform=transform)
-dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
+
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0)
 
 
 class Discriminator(nn.Module):
@@ -68,7 +82,7 @@ class Discriminator(nn.Module):
         x = self.conv2(x)
         x = self.relu(x)
         x = self.pool2(x)
-        x = x.flatten()
+        x = x.view(x.size(0), -1)
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
@@ -78,8 +92,8 @@ class Discriminator(nn.Module):
 
 
 class Generator(nn.Module):
-    class Generator(nn.Module):
-        def __init__(self, z_dim=128, g_channels=64, out_channels=3):
+
+    def __init__(self, z_dim=128, g_channels=64, out_channels=3):
             super().__init__()
 
             # input Z: (z_dim, 1, 1)
@@ -99,7 +113,7 @@ class Generator(nn.Module):
             self.tanh = nn.Tanh()
             self.relu = nn.ReLU()
 
-        def forward(self, z):
+    def forward(self, z):
             z = self.convT1(z)
             z = self.bn1(z)
             z = self.relu(z)
@@ -118,13 +132,42 @@ class Generator(nn.Module):
             return z
 
 
-
+generator = Generator().to(device)
+discriminator = Discriminator().to(device)
 model = Discriminator()
-x = dataset.__getitem__(10)
-model.forward(x)
 
+criterion = nn.BCELoss()
+fixed_noise = torch.randn(32, 100, 1, 1, device=device) #(batch, channels, h, w)
 
-print(torch.__version__)
-print(torch.cuda.is_available())              # should be True
-print(torch.version.cuda)                     # should be '11.8'
-print(torch.cuda.get_device_name(0))          # GPU name
+real_label = 1.
+fake_label = 0.
+
+generator.apply(weights_init)
+discriminator.apply(weights_init)
+
+optimizerG = optim.Adam(generator.parameters(), lr=0.1, betas=(0.5, 0.999))
+optimizerD = optim.Adam(discriminator.parameters(), lr=0.1, betas=(0.5, 0.999))
+
+epochs = 10
+for epoch in range(epochs):
+    for i, data in enumerate(dataloader, 0):
+        ## Train with all-real batch
+        discriminator.zero_grad()
+        real_cpu = data.to(device)
+        b_size = real_cpu.size(0)
+        label = torch.full((b_size,), real_label, dtype=torch.float, device=device)
+        output = discriminator(real_cpu).view(-1)
+        errD_real = criterion(output, label)
+        errD_real.backward()
+        D_x = output.mean().item()
+
+        ## Train with all-fake batch
+        noise = torch.randn(b_size, 100, 1, 1, device=device)
+        fake = generator(noise)
+        label.fill_(fake_label)
+        output = generator(fake.detach()).view(-1)
+        errD_fake = criterion(output, label)
+        errD_fake.backward()
+        D_G_z1 = output.mean().item()
+        errD = errD_real + errD_fake
+        optimizerD.step()
