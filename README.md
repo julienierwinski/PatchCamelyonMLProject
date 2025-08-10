@@ -6,3 +6,6 @@ Uses PatchCamelyon (PCam) medical imaging dataset to implement the following mac
   2. Convolutional Neural Networks - creates basic CNN using PCam images and compare test accuracy to rotation-equivariant CNN
   3. Generative Adversarial Networks - generates high-fidelity pathological image samples and investigates performance
   4. Autoencoders - trains autoencoder neural network, updates encoder and decoder parameters
+
+Main branch - includes transfer learning (Path Foundation), classifiers, and standard CNN implementation to PCam
+Master branch - includes GAN and authoencoders implementation
